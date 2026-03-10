@@ -38,7 +38,7 @@ First, determine the subject_type from one of these exact values:
   "figurine_model"   → resin/plastic/ceramic cat figure, scale model
   "human_in_costume" → person wearing a cat costume, cat ears, cat makeup
   "cat_mask_prop"    → cat mask, cat face prop held/worn by a human
-  "printed_image"    → photo of a photo, screenshot, image on a screen/billboard
+  "printed_image"    → photo of a physical printed paper/poster only (screen photos are ALLOWED)
   "other_animal"     → dog, rabbit, or any non-cat animal
   "no_cat"           → no cat-like subject at all
 
@@ -77,7 +77,7 @@ Message templates by type:
   figurine_model   → "ตรวจพบโมเดลหรือฟิกเกอร์รูปแมว ไม่ใช่แมวจริง"
   human_in_costume → "ตรวจพบมนุษย์ที่แต่งตัวเป็นแมว ไม่ใช่แมวจริง"
   cat_mask_prop    → "ตรวจพบหน้ากากแมวหรืออุปกรณ์ประกอบฉาก ไม่ใช่แมวจริง"
-  printed_image    → "ตรวจพบภาพที่ถ่ายจากหน้าจอหรือรูปพิมพ์ กรุณาถ่ายแมวโดยตรง"
+
   other_animal     → "ตรวจพบสัตว์ชนิดอื่น ไม่ใช่แมว"
   no_cat           → "ไม่พบแมวในภาพ"
 
@@ -156,7 +156,7 @@ FAKE_CAT_TYPES = {
     "figurine_model",
     "human_in_costume",
     "cat_mask_prop",
-    "printed_image",
+    
     "other_animal",
     "no_cat",
 }
@@ -471,7 +471,7 @@ def analyze_cat(image_cat: str) -> dict:
             "figurine_model":   "ตรวจพบโมเดลหรือฟิกเกอร์รูปแมว ไม่ใช่แมวจริง",
             "human_in_costume": "ตรวจพบมนุษย์ที่แต่งตัวเป็นแมว ไม่ใช่แมวจริง",
             "cat_mask_prop":    "ตรวจพบหน้ากากแมวหรืออุปกรณ์ประกอบฉาก ไม่ใช่แมวจริง",
-            "printed_image":    "ตรวจพบภาพที่ถ่ายจากหน้าจอหรือรูปพิมพ์ กรุณาถ่ายแมวโดยตรง",
+        
             "other_animal":     "ตรวจพบสัตว์ชนิดอื่น ไม่ใช่แมว",
             "no_cat":           "ไม่พบแมวในภาพ",
         }
