@@ -1,0 +1,15 @@
+# YOLO / ML
+*.pt
+*.onnx
+*.weights
+.env
+# dataset
+dataset/
+images/
+runs/
+
+# cache
+__pycache__/
+*.log
+
+app/serviceAccount.json

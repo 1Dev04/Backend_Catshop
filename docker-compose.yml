@@ -1,0 +1,53 @@
+version: "3.8"
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: cat_postgres
+    restart: always
+    environment:
+      POSTGRES_USER: catuser
+      POSTGRES_PASSWORD: catpassword
+      POSTGRES_DB: catdb
+      PGDATA: /var/lib/postgresql/data/pgdata
+      TZ: Asia/Bangkok  # เพิ่ม timezone
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - catshop_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U catuser -d catdb"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  fastapi:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: catshop_fastapi
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      # Database
+      - DATABASE_URL=postgresql://catuser:Qc6CgariRTv2thkYymNzhLrmKRGE3CPN@dpg-d645vn7pm1nc738ihcng-a.singapore-postgres.render.com:5432/catdb_xt7q
+
+    volumes:
+      - ./app:/app/app
+    working_dir: /app
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - catshop_network
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+volumes:
+  postgres_data:
+
+networks:
+  catshop_network:
+    driver: bridge
