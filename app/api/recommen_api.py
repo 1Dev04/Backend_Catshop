@@ -150,13 +150,15 @@ async def get_recommendations(
                 price,
                 discount_price,
                 CASE
-                    WHEN discount_price IS NOT NULL AND discount_price < price
-                    THEN CONCAT(
-                        ROUND(((price - discount_price) / price * 100)::numeric, 0),
-                        '%'
-                    )
-                    ELSE NULL
-                END                         AS discount_percent,
+                WHEN discount_price IS NOT NULL 
+                AND discount_price > 0
+                AND discount_price < price
+                THEN CONCAT(
+                ROUND(((price - discount_price) / price * 100)::numeric, 0),
+                '%'
+                )
+                ELSE NULL
+                END AS discount_percent,
                 stock,
                 image_url,
                 images,
@@ -266,7 +268,9 @@ async def get_recommendation_detail(
                 price,
                 discount_price,
                 CASE
-                    WHEN discount_price IS NOT NULL AND discount_price < price
+                    WHEN discount_price IS NOT NULL
+                    AND discount_price > 0 
+                    AND discount_price < price
                     THEN CONCAT(
                         ROUND(((price - discount_price) / price * 100)::numeric, 0),
                         '%'
