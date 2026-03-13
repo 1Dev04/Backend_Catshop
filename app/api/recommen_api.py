@@ -59,12 +59,9 @@ def _calc_size(chest: float) -> str:
 async def get_recommendations(
     page: int = Query(default=1, ge=1, description="หน้าที่ต้องการ"),
     page_size: int = Query(default=10, ge=1, le=50, description="จำนวนต่อหน้า"),
+    cat_id: int = Query(default=None, description="ระบุ cat id (ถ้าไม่ส่ง → ใช้แมวล่าสุด)"),  
     user: dict = Depends(verify_firebase_token),
 ):
-    """
-    ดึง clothing ที่เหมาะกับแมวล่าสุดของ user
-    match_score = size(0.5) + weight_in_range(0.3) + chest_in_range(0.2)
-    """
     firebase_uid = user.get("firebase_uid")
     if not firebase_uid:
         raise HTTPException(status_code=401, detail="Invalid Firebase token")
@@ -74,27 +71,49 @@ async def get_recommendations(
 
     async with pool.acquire() as conn:
 
-        # ── ดึง cat ล่าสุดของ user ───────────────────────────────────────────
-        cat = await conn.fetchrow(
-            """
-            SELECT
-                id, cat_color, breed, age, gender,
-                weight, size_category,
-                chest_cm, neck_cm, body_length_cm,
-                confidence, bounding_box, thumbnail_url,
-                age_category, body_condition, body_condition_score,
-                body_condition_description,
-                bmi, waist_cm, back_length_cm, leg_length_cm,
-                posture, size_recommendation, size_ranges,
-                quality_flag, analysis_version, analysis_method,
-                image_cat, detected_at, updated_at
-            FROM cat
-            WHERE firebase_uid = $1
-            ORDER BY detected_at DESC
-            LIMIT 1
-            """,
-            firebase_uid,
-        )
+        # ✅ ถ้ามี cat_id → ดึงแมวตัวนั้น (ต้องเป็นของ user คนนี้เท่านั้น)
+        # ✅ ถ้าไม่มี → ดึงแมวล่าสุด (behavior เดิม)
+        if cat_id is not None:
+            cat = await conn.fetchrow(
+                """
+                SELECT
+                    id, cat_color, breed, age, gender,
+                    weight, size_category,
+                    chest_cm, neck_cm, body_length_cm,
+                    confidence, bounding_box, thumbnail_url,
+                    age_category, body_condition, body_condition_score,
+                    body_condition_description,
+                    bmi, waist_cm, back_length_cm, leg_length_cm,
+                    posture, size_recommendation, size_ranges,
+                    quality_flag, analysis_version, analysis_method,
+                    image_cat, detected_at, updated_at
+                FROM cat
+                WHERE firebase_uid = $1
+                  AND id = $2
+                """,
+                firebase_uid, cat_id,
+            )
+        else:
+            cat = await conn.fetchrow(
+                """
+                SELECT
+                    id, cat_color, breed, age, gender,
+                    weight, size_category,
+                    chest_cm, neck_cm, body_length_cm,
+                    confidence, bounding_box, thumbnail_url,
+                    age_category, body_condition, body_condition_score,
+                    body_condition_description,
+                    bmi, waist_cm, back_length_cm, leg_length_cm,
+                    posture, size_recommendation, size_ranges,
+                    quality_flag, analysis_version, analysis_method,
+                    image_cat, detected_at, updated_at
+                FROM cat
+                WHERE firebase_uid = $1
+                ORDER BY detected_at DESC
+                LIMIT 1
+                """,
+                firebase_uid,
+            )
 
         if not cat:
             return {
@@ -111,9 +130,10 @@ async def get_recommendations(
                 "message": "ยังไม่มีข้อมูลแมว กรุณาวิเคราะห์แมวก่อน",
             }
 
-        # ✅ FIX: ใช้ _safe_float แทน float() ตรงๆ ป้องกัน None crash
+        # ส่วนที่เหลือเหมือนเดิมทุกอย่าง ไม่ต้องแก้
         weight_val = _safe_float(cat["weight"], default=4.0)
         chest_val  = _safe_float(cat["chest_cm"], default=32.0)
+        size = cat["size_category"] or _calc_size(chest_val)
 
         # ✅ FIX: size_category อาจเป็น None → คำนวณจาก chest แทน
         size = cat["size_category"] or _calc_size(chest_val)
