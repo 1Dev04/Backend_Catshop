@@ -59,7 +59,7 @@ def _calc_size(chest: float) -> str:
 async def get_recommendations(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=10, ge=1, le=50),
-    cat_id: int = Query(default=None),
+    cat_id: int | None = Query(default=None),
     user: dict = Depends(verify_firebase_token),
 ):
     firebase_uid = user.get("firebase_uid")
@@ -71,31 +71,36 @@ async def get_recommendations(
 
     async with pool.acquire() as conn:
 
-        if cat_id is not None:
+        # ── ดึง cat ตาม cat_id หรือล่าสุด ──────────────────────────────────
+        if cat_id:
             cat = await conn.fetchrow(
                 """
                 SELECT id, cat_color, breed, age, gender,
-                    weight, size_category, chest_cm, neck_cm, body_length_cm,
+                    weight, size_category,
+                    chest_cm, neck_cm, body_length_cm,
                     confidence, bounding_box, thumbnail_url,
                     age_category, body_condition, body_condition_score,
-                    body_condition_description, bmi, waist_cm, back_length_cm,
-                    leg_length_cm, posture, size_recommendation, size_ranges,
+                    body_condition_description,
+                    bmi, waist_cm, back_length_cm, leg_length_cm,
+                    posture, size_recommendation, size_ranges,
                     quality_flag, analysis_version, analysis_method,
                     image_cat, detected_at, updated_at
                 FROM cat
-                WHERE firebase_uid = $1 AND id = $2
+                WHERE id = $1 AND firebase_uid = $2
                 """,
-                firebase_uid, cat_id,
+                cat_id, firebase_uid,
             )
         else:
             cat = await conn.fetchrow(
                 """
                 SELECT id, cat_color, breed, age, gender,
-                    weight, size_category, chest_cm, neck_cm, body_length_cm,
+                    weight, size_category,
+                    chest_cm, neck_cm, body_length_cm,
                     confidence, bounding_box, thumbnail_url,
                     age_category, body_condition, body_condition_score,
-                    body_condition_description, bmi, waist_cm, back_length_cm,
-                    leg_length_cm, posture, size_recommendation, size_ranges,
+                    body_condition_description,
+                    bmi, waist_cm, back_length_cm, leg_length_cm,
+                    posture, size_recommendation, size_ranges,
                     quality_flag, analysis_version, analysis_method,
                     image_cat, detected_at, updated_at
                 FROM cat
@@ -108,36 +113,37 @@ async def get_recommendations(
 
         if not cat:
             return {
-                "cat": None, "items": [],
-                "pagination": {"total": 0, "page": page, "page_size": page_size,
-                               "total_pages": 0, "has_next": False, "has_prev": False},
+                "cat": None,
+                "items": [],
+                "pagination": {
+                    "total": 0, "page": page, "page_size": page_size,
+                    "total_pages": 0, "has_next": False, "has_prev": False,
+                },
                 "message": "ยังไม่มีข้อมูลแมว กรุณาวิเคราะห์แมวก่อน",
             }
 
         weight_val = _safe_float(cat["weight"], default=4.0)
         chest_val  = _safe_float(cat["chest_cm"], default=32.0)
         size       = cat["size_category"] or _calc_size(chest_val)
-        cat_breed  = (cat["breed"] or "").strip()
+        breed      = cat["breed"]  # ✅ อาจเป็น None
 
-        # ── COUNT ─────────────────────────────────────────────────────────────
+        # ── COUNT ────────────────────────────────────────────────────────────
         total: int = await conn.fetchval(
             """
             SELECT COUNT(*)
             FROM cat_clothing
             WHERE is_active     = true
               AND size_category = $1
-              AND min_weight   <= $2
-              AND max_weight   >= $2
               AND (
-                  breed IS NULL
-                  OR TRIM(breed) = ''
-                  OR LOWER(TRIM(breed)) = LOWER(TRIM($3))
+                $2::text IS NULL
+                OR breed IS NULL
+                OR breed = $2
               )
             """,
-            size, weight_val, cat_breed,
+            size, breed,
         )
 
-        # ── ROWS ──────────────────────────────────────────────────────────────
+        # ── FETCH ────────────────────────────────────────────────────────────
         rows = await conn.fetch(
             """
             SELECT
@@ -149,50 +155,51 @@ async def get_recommendations(
                     WHEN discount_price IS NOT NULL
                     AND  discount_price > 0
                     AND  discount_price < price
-                    THEN CONCAT(ROUND(((price - discount_price) / price * 100)::numeric, 0), '%')
+                    THEN CONCAT(
+                        ROUND(((price - discount_price) / price * 100)::numeric, 0),
+                        '%')
                     ELSE NULL
                 END AS discount_percent,
                 stock, image_url, images, gender, breed,
                 is_featured, clothing_like,
 
-                (size_category = $1)                    AS match_size,
-                (min_weight <= $2 AND max_weight >= $2) AS match_weight,
+                -- match flags
+                (size_category = $1)                        AS match_size,
+                (
+                    breed IS NULL OR breed = $2
+                )                                           AS match_breed,
+                (min_weight <= $3 AND max_weight >= $3)     AS match_weight,
                 (
                     chest_min_cm IS NOT NULL AND chest_max_cm IS NOT NULL
-                    AND chest_min_cm <= $3 AND chest_max_cm >= $3
-                )                                       AS match_chest,
-                (
-                    breed IS NOT NULL
-                    AND TRIM(breed) != ''
-                    AND LOWER(TRIM(breed)) = LOWER(TRIM($4))
-                )                                       AS match_breed,
+                    AND chest_min_cm <= $4 AND chest_max_cm >= $4
+                )                                           AS match_chest,
 
+                -- match_score: size(0.4) + breed(0.1) + weight(0.3) + chest(0.2)
                 ROUND((
-                    0.5
-                    + CASE WHEN min_weight <= $2 AND max_weight >= $2
-                           THEN 0.3 ELSE 0.0 END
-                    + CASE WHEN chest_min_cm IS NOT NULL AND chest_max_cm IS NOT NULL
-                                AND chest_min_cm <= $3 AND chest_max_cm >= $3
-                           THEN 0.2 ELSE 0.0 END
-                    + CASE WHEN breed IS NOT NULL AND TRIM(breed) != ''
-                                AND LOWER(TRIM(breed)) = LOWER(TRIM($4))
+                    0.4
+                    + CASE WHEN breed IS NULL OR breed = $2
                            THEN 0.1 ELSE 0.0 END
-                )::numeric, 3)                          AS match_score
+                    + CASE WHEN min_weight <= $3 AND max_weight >= $3
+                           THEN 0.3 ELSE 0.0 END
+                    + CASE WHEN chest_min_cm IS NOT NULL
+                                AND chest_max_cm IS NOT NULL
+                                AND chest_min_cm <= $4
+                                AND chest_max_cm >= $4
+                           THEN 0.2 ELSE 0.0 END
+                )::numeric, 3)                              AS match_score
 
             FROM cat_clothing
             WHERE is_active     = true
               AND size_category = $1
-              AND min_weight   <= $2
-              AND max_weight   >= $2
               AND (
-                  breed IS NULL
-                  OR TRIM(breed) = ''
-                  OR LOWER(TRIM(breed)) = LOWER(TRIM($4))
+                $2::text IS NULL
+                OR breed IS NULL
+                OR breed = $2
               )
             ORDER BY match_score DESC, is_featured DESC, clothing_like DESC
             LIMIT $5 OFFSET $6
             """,
-            size, weight_val, chest_val, cat_breed, page_size, offset,
+            size, breed, weight_val, chest_val, page_size, offset,
         )
 
     items = [_serialize(dict(r)) for r in rows]
@@ -202,12 +209,15 @@ async def get_recommendations(
         "cat": _serialize(dict(cat)),
         "items": items,
         "pagination": {
-            "total": total, "page": page, "page_size": page_size,
+            "total":       total,
+            "page":        page,
+            "page_size":   page_size,
             "total_pages": total_pages,
-            "has_next": page < total_pages,
-            "has_prev": page > 1,
+            "has_next":    page < total_pages,
+            "has_prev":    page > 1,
         },
     }
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 2. DETAIL — clothing detail + cat match (หน้า "Learn More")
@@ -262,7 +272,7 @@ async def get_recommendation_detail(
                 discount_price,
                 CASE
                     WHEN discount_price IS NOT NULL
-                    AND discount_price > 0
+                    AND discount_price > 0 
                     AND discount_price < price
                     THEN CONCAT(
                         ROUND(((price - discount_price) / price * 100)::numeric, 0),
@@ -294,14 +304,12 @@ async def get_recommendation_detail(
 
     # ── คำนวณ match กับ cat (ถ้ามี) ─────────────────────────────────────────
     if cat:
+        # ✅ FIX: ใช้ _safe_float ทั้ง weight และ chest_cm
         c_weight = _safe_float(cat["weight"], default=4.0)
         c_chest  = _safe_float(cat["chest_cm"], default=32.0)
-        cl       = dict(clothing)                       # ✅ assign ก่อนใช้
-        c_breed  = (cat["breed"] or "").strip()
-        cl_breed = (cl.get("breed") or "").strip()
         c_size   = cat["size_category"] or _calc_size(c_chest)
+        cl       = dict(clothing)
 
-        match_breed  = bool(cl_breed and c_breed and cl_breed.lower() == c_breed.lower())
         match_size   = c_size == cl["size_category"]
         match_weight = (
             cl["min_weight"] is not None
@@ -316,8 +324,7 @@ async def get_recommendation_detail(
         match_score = round(
             (0.5 if match_size   else 0.0)
             + (0.3 if match_weight else 0.0)
-            + (0.2 if match_chest  else 0.0)
-            + (0.1 if match_breed  else 0.0),   # ✅ breed bonus เหมือน LIST
+            + (0.2 if match_chest  else 0.0),
             3,
         )
 
@@ -325,7 +332,6 @@ async def get_recommendation_detail(
         if match_size:   parts.append("ขนาดตรง")
         if match_weight: parts.append("น้ำหนักอยู่ใน range")
         if match_chest:  parts.append("รอบอกพอดี")
-        if match_breed:  parts.append("สายพันธุ์ตรง")
         reason = " • ".join(parts) if parts else "ไม่ตรงเกณฑ์"
 
         result["cat_match"] = {
@@ -338,10 +344,9 @@ async def get_recommendation_detail(
             "match_size":   match_size,
             "match_weight": match_weight,
             "match_chest":  match_chest,
-            "match_breed":  match_breed,
             "reason":       reason,
         }
     else:
         result["cat_match"] = None
 
-    return {"item": result}
+    return {"item": result}  
