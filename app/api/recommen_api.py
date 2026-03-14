@@ -9,7 +9,7 @@ from app.auth.dependencies import verify_firebase_token
 router = APIRouter()
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Helper
+# Helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _serialize(d: dict) -> dict:
@@ -39,6 +39,36 @@ def _calc_size(chest: float) -> str:
     return "XL"
 
 
+def _resolve_size(cat_row: dict) -> str | None:
+    """
+    Priority:
+      1. size_category  (บันทึกใน DB แล้ว — ถูกต้องที่สุด)
+      2. size_recommendation (fallback จาก AI)
+      3. คำนวณจาก chest_cm จริง (ถ้ามี)
+      4. None → ไม่รู้ size จริงๆ อย่า force
+    ไม่ใช้ default chest 32.0 เด็ดขาด
+    """
+    # 1. size_category
+    val = cat_row.get("size_category")
+    if val and str(val).strip():
+        return str(val).strip()
+
+    # 2. size_recommendation
+    val = cat_row.get("size_recommendation")
+    if val and str(val).strip():
+        return str(val).strip()
+
+    # 3. คำนวณจาก chest_cm ถ้ามีค่าจริง
+    chest = cat_row.get("chest_cm")
+    if chest is not None:
+        try:
+            return _calc_size(float(chest))
+        except (TypeError, ValueError):
+            pass
+
+    return None
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 1. LIST
 #    GET /system/recommend/
@@ -55,6 +85,7 @@ async def get_recommendations(
     match_score = size(0.4) + breed(0.1) + weight(0.3) + chest(0.2)
     - breed IS NULL ใน clothing → ใส่ได้ทุกพันธุ์ → match_breed = true
     - cat breed IS NULL → ไม่กรอง breed เลย
+    - chest_cm IS NULL ใน cat → ไม่ใช้ default, skip match_chest
     """
     firebase_uid = user.get("firebase_uid")
     if not firebase_uid:
@@ -118,12 +149,31 @@ async def get_recommendations(
                 "message": "ยังไม่มีข้อมูลแมว กรุณาวิเคราะห์แมวก่อน",
             }
 
-        weight_val = _safe_float(cat["weight"], default=4.0)
-        chest_val  = _safe_float(cat["chest_cm"], default=32.0)
-        size       = cat["size_category"] or _calc_size(chest_val)
-        breed_val  = cat["breed"]  # None = ไม่กรอง breed
+        cat_dict   = dict(cat)
+        weight_val = _safe_float(cat_dict.get("weight"), default=4.0)
+        breed_val  = cat_dict.get("breed")  # None = ไม่กรอง breed
 
-        # ── count ────────────────────────────────────────────────────────────
+        # ── resolve size (ไม่ใช้ default chest) ──────────────────────────────
+        size = _resolve_size(cat_dict)
+        if not size:
+            return {
+                "cat": _serialize(cat_dict),
+                "items": [],
+                "pagination": {
+                    "total": 0, "page": page, "page_size": page_size,
+                    "total_pages": 0, "has_next": False, "has_prev": False,
+                },
+                "message": "ไม่สามารถระบุขนาดแมวได้ กรุณาวิเคราะห์แมวใหม่หรือแก้ไขข้อมูลแมว",
+            }
+
+        # ── chest_val: None ถ้าไม่มีค่าจริง ──────────────────────────────────
+        # ใช้ None แทน default 32.0 เพื่อให้ query ไม่ match_chest ผิดพลาด
+        chest_raw  = cat_dict.get("chest_cm")
+        chest_val: float | None = (
+            float(chest_raw) if chest_raw is not None else None
+        )
+
+        # ── count ─────────────────────────────────────────────────────────────
         total: int = await conn.fetchval(
             """
             SELECT COUNT(*)
@@ -162,21 +212,30 @@ async def get_recommendations(
                 -- match flags
                 (size_category = $1) AS match_size,
                 (min_weight <= $2 AND max_weight >= $2) AS match_weight,
+
+                -- match_chest: ถ้า cat ไม่มี chest_cm ($3 IS NULL) → false (ไม่นับ)
                 (
-                    chest_min_cm IS NOT NULL AND chest_max_cm IS NOT NULL
-                    AND chest_min_cm <= $3   AND chest_max_cm >= $3
+                    $3::numeric IS NOT NULL
+                    AND chest_min_cm IS NOT NULL
+                    AND chest_max_cm IS NOT NULL
+                    AND chest_min_cm <= $3
+                    AND chest_max_cm >= $3
                 ) AS match_chest,
-                -- breed: NULL clothing = ใส่ได้ทุกพันธุ์ → true, ตรง → true, ไม่ตรง → false
+
+                -- breed: NULL clothing = ใส่ได้ทุกพันธุ์ → true
                 (breed IS NULL OR $4::text IS NULL OR breed = $4) AS match_breed,
 
                 -- match_score: size(0.4) + breed(0.1) + weight(0.3) + chest(0.2)
+                -- chest score: 0.2 ถ้ามีค่าและตรง, 0.0 ถ้าไม่มีค่าหรือไม่ตรง
                 ROUND((
                     0.4
                     + CASE WHEN breed IS NULL OR $4::text IS NULL OR breed = $4
                            THEN 0.1 ELSE 0.0 END
                     + CASE WHEN min_weight <= $2 AND max_weight >= $2
                            THEN 0.3 ELSE 0.0 END
-                    + CASE WHEN chest_min_cm IS NOT NULL
+                    + CASE
+                           WHEN $3::numeric IS NOT NULL
+                                AND chest_min_cm IS NOT NULL
                                 AND chest_max_cm IS NOT NULL
                                 AND chest_min_cm <= $3
                                 AND chest_max_cm >= $3
@@ -201,7 +260,7 @@ async def get_recommendations(
     total_pages = max(1, (total + page_size - 1) // page_size)
 
     return {
-        "cat": _serialize(dict(cat)),
+        "cat": _serialize(cat_dict),
         "items": items,
         "pagination": {
             "total":       total,
@@ -233,7 +292,8 @@ async def get_recommendation_detail(
 
         cat = await conn.fetchrow(
             """
-            SELECT id, cat_color, breed, age, weight, size_category, chest_cm
+            SELECT id, cat_color, breed, age, weight,
+                   size_category, size_recommendation, chest_cm
             FROM cat
             WHERE firebase_uid = $1
             ORDER BY detected_at DESC
@@ -271,21 +331,37 @@ async def get_recommendation_detail(
     result = _serialize(dict(clothing))
 
     if cat:
-        c_weight = _safe_float(cat["weight"], default=4.0)
-        c_chest  = _safe_float(cat["chest_cm"], default=32.0)
-        c_size   = cat["size_category"] or _calc_size(c_chest)
-        c_breed  = cat["breed"]
+        cat_dict = dict(cat)
+
+        # ── resolve size (ไม่ใช้ default chest) ──────────────────────────────
+        c_size = _resolve_size(cat_dict)
+
+        # ── chest_val: None ถ้าไม่มีค่าจริง ──────────────────────────────────
+        chest_raw = cat_dict.get("chest_cm")
+        c_chest: float | None = (
+            float(chest_raw) if chest_raw is not None else None
+        )
+
+        c_weight = _safe_float(cat_dict.get("weight"), default=4.0)
+        c_breed  = cat_dict.get("breed")
         cl       = dict(clothing)
 
-        match_size   = c_size == cl["size_category"]
+        # match_size: ถ้า resolve size ไม่ได้ → False
+        match_size = bool(c_size and c_size == cl["size_category"])
+
         match_weight = (
             cl["min_weight"] is not None and cl["max_weight"] is not None
             and float(cl["min_weight"]) <= c_weight <= float(cl["max_weight"])
         )
+
+        # match_chest: ถ้า c_chest เป็น None → False (ไม่ใช้ default)
         match_chest = (
-            cl["chest_min_cm"] is not None and cl["chest_max_cm"] is not None
+            c_chest is not None
+            and cl["chest_min_cm"] is not None
+            and cl["chest_max_cm"] is not None
             and float(cl["chest_min_cm"]) <= c_chest <= float(cl["chest_max_cm"])
         )
+
         # breed IS NULL ใน clothing = ใส่ได้ทุกพันธุ์
         match_breed = cl["breed"] is None or c_breed is None or cl["breed"] == c_breed
 
@@ -305,11 +381,11 @@ async def get_recommendation_detail(
         reason = " • ".join(parts) if parts else "ไม่ตรงเกณฑ์"
 
         result["cat_match"] = {
-            "cat_id":       cat["id"],
-            "cat_color":    cat["cat_color"],
+            "cat_id":       cat_dict["id"],
+            "cat_color":    cat_dict["cat_color"],
             "cat_size":     c_size,
             "cat_weight":   c_weight,
-            "cat_chest_cm": c_chest,
+            "cat_chest_cm": c_chest,      # อาจเป็น None (แสดงตรงๆ ไม่ปลอมค่า)
             "match_score":  match_score,
             "match_size":   match_size,
             "match_breed":  match_breed,

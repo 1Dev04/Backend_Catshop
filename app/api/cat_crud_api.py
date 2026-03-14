@@ -293,8 +293,14 @@ async def update_cat(
     })
 
     # กรอง key และ validate ว่าอยู่ใน whitelist จริงๆ
+    NUMERIC_COLUMNS = frozenset({
+    "weight", "chest_cm", "neck_cm", "waist_cm",
+    "body_length_cm", "back_length_cm", "leg_length_cm",
+    "confidence", "bmi",
+    })
+
     updates: dict = {
-        col: val
+        col: (_f(val) if col in NUMERIC_COLUMNS else val)
         for col, val in payload.items()
         if col in ALLOWED_COLUMNS
     }
@@ -485,12 +491,12 @@ async def analyze_and_save_cat(
                 analysis.get("age_category", "adult"),
                 _f(analysis.get("weight")),
                 analysis.get("size_category", "M"),
-                _f(m.get("chest_cm")),
-                _f(m.get("neck_cm")),
-                _f(m.get("waist_cm")),
-                _f(m.get("body_length_cm")),
-                _f(m.get("back_length_cm")),
-                _f(m.get("leg_length_cm")),
+                _f(analysis.get("chest_cm")),        
+                _f(analysis.get("neck_cm")),         
+                _f(analysis.get("waist_cm")),        
+                _f(analysis.get("body_length_cm")),  
+                _f(analysis.get("back_length_cm")),  
+                _f(analysis.get("leg_length_cm")),  
                 analysis.get("body_condition_score"),
                 analysis.get("body_condition"),
                 analysis.get("body_condition_description"),
