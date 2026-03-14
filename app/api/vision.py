@@ -160,41 +160,69 @@ async def analyze_cat_endpoint(
         # STEP 3 — chest_val = None ถ้าไม่มีค่า
         size       = analysis.get("size_category", "M")
         weight_val = _f(analysis.get("weight")) or 0.0
-        chest_val  = _f(analysis.get("chest_cm"))  # ✅ None ถ้าไม่มี
+        chest_val  = _f(analysis.get("chest_cm"))  
+        breed_val  = analysis.get("breed") 
 
         async with pool.acquire() as conn:
             rec_rows = await conn.fetch(
-                """
-                SELECT
-                    id, uuid, clothing_name, category, size_category,
-                    price, discount_price,
-                    CASE
-                        WHEN discount_price IS NOT NULL AND discount_price < price
-                        THEN CONCAT(ROUND(((price-discount_price)/price*100)::numeric,0),'%')
-                        ELSE NULL
-                    END AS discount_percent,
-                    stock, image_url, gender, is_featured, clothing_like,
-                    ROUND((
-                        0.5
-                        + CASE WHEN min_weight <= $2 AND max_weight >= $2
-                               THEN 0.3 ELSE 0.0 END
-                        + CASE WHEN $3::numeric IS NOT NULL   -- ✅ NULL-safe
-                                    AND chest_min_cm IS NOT NULL
-                                    AND chest_max_cm IS NOT NULL
-                                    AND chest_min_cm <= $3
-                                    AND chest_max_cm >= $3
-                               THEN 0.2 ELSE 0.0 END
-                    )::numeric, 3) AS match_score
-                FROM cat_clothing
-                WHERE is_active = true
-                  AND size_category = $1
-                  AND min_weight <= $2
-                  AND max_weight >= $2
-                ORDER BY match_score DESC, is_featured DESC, clothing_like DESC
-                LIMIT 20
-                """,
-                size, weight_val, chest_val,  # chest_val อาจเป็น None
-            )
+        """
+        SELECT
+            id, uuid, clothing_name, category,
+            size_category, min_weight, max_weight,
+            chest_min_cm, chest_max_cm,
+            price, discount_price,
+            CASE
+                WHEN discount_price IS NOT NULL
+                AND  discount_price > 0
+                AND  discount_price < price
+                THEN CONCAT(
+                    ROUND(((price - discount_price) / price * 100)::numeric, 0),
+                    '%')
+                ELSE NULL
+            END AS discount_percent,
+            stock, image_url, images, gender, breed,
+            is_featured, clothing_like,
+
+            -- match flags
+            (size_category = $1) AS match_size,
+            (min_weight <= $2 AND max_weight >= $2) AS match_weight,
+            (
+                $3::numeric IS NOT NULL
+                AND chest_min_cm IS NOT NULL
+                AND chest_max_cm IS NOT NULL
+                AND chest_min_cm <= $3
+                AND chest_max_cm >= $3
+            ) AS match_chest,
+            (breed IS NULL OR $4::text IS NULL OR breed = $4) AS match_breed,
+
+            -- match_score: size(0.4) + breed(0.1) + weight(0.3) + chest(0.2)
+            ROUND((
+                0.4
+                + CASE WHEN breed IS NULL OR $4::text IS NULL OR breed = $4
+                       THEN 0.1 ELSE 0.0 END
+                + CASE WHEN min_weight <= $2 AND max_weight >= $2
+                       THEN 0.3 ELSE 0.0 END
+                + CASE WHEN $3::numeric IS NOT NULL
+                            AND chest_min_cm IS NOT NULL
+                            AND chest_max_cm IS NOT NULL
+                            AND chest_min_cm <= $3
+                            AND chest_max_cm >= $3
+                       THEN 0.2 ELSE 0.0 END
+            )::numeric, 3) AS match_score
+
+        FROM cat_clothing
+        WHERE is_active     = true
+          AND size_category = $1
+          AND (
+              $4::text IS NULL          -- cat ไม่รู้ breed → แสดงทั้งหมด
+              OR breed IS NULL          -- clothing ไม่ระบุ breed → ใส่ได้ทุกพันธุ์
+              OR breed = $4             -- breed ตรง
+          )
+        ORDER BY match_score DESC, is_featured DESC, clothing_like DESC
+        LIMIT 20
+        """,
+        size, weight_val, chest_val, breed_val,
+        )
 
         recommendations = [_serialize(dict(r)) for r in rec_rows]
         print(f"✅ Recommendations: {len(recommendations)} items")
