@@ -25,7 +25,8 @@ class ClothingItemResponse(BaseModel):
     images: dict
     clothing_name: str
     description: str
-    category: int
+    category: Optional[str] = None        # varchar(50) ไม่ใช่ int
+    category_id: Optional[int] = None     # int4
     category_name_en: Optional[str] = None
     category_name_th: Optional[str] = None
     size_category: str
@@ -34,9 +35,8 @@ class ClothingItemResponse(BaseModel):
     discount_percent: Optional[int] = None
     gender: int
     stock: int
-    breed: str
+    breed: Optional[str] = None           # Optional เผื่อ null
     created_at: str
-
 class PaginatedResponse(BaseModel):
     items: List[ClothingItemResponse]
     total: int
@@ -225,16 +225,16 @@ async def search_clothing_page(
 
     items_sql = (
         "SELECT c.id, c.uuid, c.image_url, c.images, "
-        "c.clothing_name, c.description, c.category_id, "
-        "sc.name_category AS category_name_en, sc.name_category AS category_name_th, "  # แก้ตรงนี้
-        "c.size_category, c.price, c.discount_price, "
-        + _DISCOUNT_PERCENT_ALIAS + ", "
-        "c.gender, c.stock, c.breed, c.created_at "
-        "FROM cat_clothing c "
-        "LEFT JOIN search_category sc ON c.category_id = sc.id "
-        "WHERE " + where_clause + " "
-        f"ORDER BY c.created_at DESC "
-        f"LIMIT ${param_count} OFFSET ${param_count + 1}"
+    "c.clothing_name, c.description, c.category, c.category_id, "
+    "sc.name_category AS category_name_en, sc.name_category AS category_name_th, "
+    "c.size_category, c.price, c.discount_price, "
+    + _DISCOUNT_PERCENT_ALIAS + ", "
+    "c.gender, c.stock, c.breed, c.created_at "
+    "FROM cat_clothing c "
+    "LEFT JOIN search_category sc ON c.category_id = sc.id "
+    "WHERE " + where_clause + " "
+    f"ORDER BY c.created_at DESC "
+    f"LIMIT ${param_count} OFFSET ${param_count + 1}"
     )
 
     try:
