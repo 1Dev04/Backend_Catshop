@@ -5,7 +5,7 @@ import asyncpg
 from typing import Optional, List
 from pydantic import BaseModel
 from app.db.database import get_db_pool
-
+from datetime import datetime
 router = APIRouter()
 
 
@@ -36,7 +36,7 @@ class ClothingItemResponse(BaseModel):
     gender: int
     stock: int
     breed: Optional[str] = None           # Optional เผื่อ null
-    created_at: str
+    created_at: Optional[datetime] = None 
 class PaginatedResponse(BaseModel):
     items: List[ClothingItemResponse]
     total: int
@@ -246,7 +246,14 @@ async def search_clothing_page(
             total_pages = (total_count + page_size - 1) // page_size
 
             rows = await connection.fetch(items_sql, *params, page_size, offset)
-            items = [dict(row) for row in rows]
+            
+            items = []
+            for row in rows:
+                item = dict(row)
+                if isinstance(item.get('images'), str):
+                    import json
+                    item['images'] = json.loads(item['images'])
+                items.append(item)
 
         return {
             "items":       items,
