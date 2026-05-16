@@ -231,3 +231,4 @@ def detect_cat(image_url: str) -> dict:
 
     raw_text = _call_openai_detect(image_bytes, mime_type)
     return _build_result(raw_text)
+
