@@ -223,10 +223,10 @@ async def search_clothing_page(
     )
 
 
-    items_sql = (  # nosec B608
+    items_sql = (
         "SELECT c.id, c.uuid, c.image_url, c.images, "
         "c.clothing_name, c.description, c.category_id, "
-        "c.name_category AS category_name_en, c.name_category AS category_name_th,"
+        "sc.name_category AS category_name_en, sc.name_category AS category_name_th, "  # แก้ตรงนี้
         "c.size_category, c.price, c.discount_price, "
         + _DISCOUNT_PERCENT_ALIAS + ", "
         "c.gender, c.stock, c.breed, c.created_at "
