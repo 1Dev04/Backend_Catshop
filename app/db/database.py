@@ -20,8 +20,8 @@ async def create_db_pool():
         try:
             _pool = await asyncpg.create_pool(
                 DATABASE_URL,
-                min_size=1,
-                max_size=5,
+                min_size=5,
+                max_size=20,
                 server_settings={'client_encoding': 'UTF8'}
             )
             print("✅ Database connected")

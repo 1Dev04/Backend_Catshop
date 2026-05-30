@@ -35,20 +35,27 @@ Schema (return exactly this):
 }
 
 Rules:
-- "is_cat": true ONLY if there is a real domestic cat visible (NOT lion/tiger/cheetah/wildcat)
-- "is_single": true ONLY if exactly 1 cat is visible in the entire image
-- "is_real_photo": true = real photograph | false = cartoon/anime/drawing/plush/figurine/3D render/toy
+- "is_cat": true ONLY if there is a real domestic cat visible (NOT lion/tiger/wildcat)
+- "is_single": true ONLY if exactly 1 cat is visible
+- "is_real_photo": true = real photograph | false = cartoon/anime/drawing/plush/figurine/toy
 - "reason": MUST be one of these exact strings:
-    "passed"         → single real cat, real photo ✅
-    "no_cat"         → no cat found in image
-    "multiple_cats"  → 2 or more cats detected
-    "is_dog"         → dog detected (not a cat)
-    "non_cat_animal" → other animal (rabbit, bird, hamster, etc.)
-    "cartoon"        → cartoon / drawing / toy / not a real photo
-    "other"          → cannot determine clearly
-- "confidence": float 0.0-1.0 how confident you are in the result
-"""
+    "passed"           → single real cat, real photo
+    "no_cat"           → no cat found
+    "multiple_cats"    → 2 or more cats
+    "non_cat_animal"   → other animal (dog, rabbit, bird etc.)
+    "cartoon"          → cartoon / drawing / toy / not real photo
+    "human_face_cat"   → cat body with human face (face swap / AI generated)
+    "human_in_costume" → human wearing cat costume
+    "stuffed_toy"      → stuffed animal / plush cat
+    "figurine_model"   → figurine / model / statue of cat
+    "cat_mask_prop"    → person wearing cat mask
+    "other"            → cannot determine clearly
+- "confidence": float 0.0-1.0
 
+Important:
+- Unusual-looking real cats (Cornish Rex, Sphynx, Scottish Fold) → "passed"
+- Only use "human_face_cat" if a real human face is digitally merged onto a cat body
+"""
 
 # ── JSON Parser ───────────────────────────────────────────────────────────────
 
