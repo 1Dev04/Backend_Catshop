@@ -129,6 +129,7 @@ First, determine the subject_type from one of these exact values:
   "human_in_costume" → person wearing a cat costume, cat ears, cat makeup
   "cat_mask_prop"    → cat mask, cat face prop held/worn by a human
   "human_face_cat"   → cat body but with a real human face (face swap / AI generated)
+  "meme_cat"         → cat with intentionally distorted/exaggerated/manipulated face (viral meme)
   "printed_image"    → photo of a physical printed paper/poster only
   "other_animal"     → dog, rabbit, or any non-cat animal
   "no_cat"           → no cat-like subject at all
@@ -142,6 +143,9 @@ Key detection rules for REJECTING fake cats:
   ✗ Cat face but human body parts visible
   ✗ Real human facial features (eyes, nose, mouth) on a cat body → human_face_cat
   ✗ Uncanny valley appearance: cat shape but human-like face expression/structure → human_face_cat
+  ✗ Cat face that is clearly distorted, exaggerated, or digitally manipulated → meme_cat
+  ✗ Cat screaming/grimacing in an unnatural/absurd way → meme_cat
+  ✗ Viral internet meme cat image → meme_cat
 
 Key features of a REAL cat:
   ✓ Actual fur texture with individual hair strands
@@ -150,6 +154,9 @@ Key features of a REAL cat:
   ✓ Natural muscle/fat variation under fur
   ✓ Paws with visible toe beans or claws
   ✓ Natural lighting interaction on fur
+  ✓ Naturally unusual breeds: Sphynx, Cornish Rex, Scottish Fold → real_cat
+  ✓ Cat yawning, hissing, or making natural expressions → real_cat
+  ✓ Cat with funny but NATURAL face → real_cat
   
 
 ════════════════════════════════════════════════════════
@@ -172,6 +179,7 @@ Message templates by type:
   human_face_cat   → "ตรวจพบใบหน้ามนุษย์บนแมว (Face Swap/AI) ไม่ใช่แมวจริง"
   cat_mask_prop    → "ตรวจพบหน้ากากแมวหรืออุปกรณ์ประกอบฉาก ไม่ใช่แมวจริง"
   other_animal     → "ตรวจพบสัตว์ชนิดอื่น ไม่ใช่แมว"
+  meme_cat → "ตรวจพบภาพแมวมีม/ภาพที่ถูกตกแต่ง ไม่รองรับภาพประเภทนี้"
   no_cat           → "ไม่พบแมวในภาพ"
 
 ════════════════════════════════════════════════════════
@@ -257,9 +265,10 @@ confidence: 0.0-1.0 reflecting image clarity and full body visibility
 
 # ── subject_type constants ────────────────────────────────────
 FAKE_CAT_TYPES = {
-      "cartoon", "stuffed_toy", "figurine_model",
+    "cartoon", "stuffed_toy", "figurine_model",
     "human_in_costume", "cat_mask_prop",
-    "human_face_cat", 
+    "human_face_cat",
+    "meme_cat",
     "other_animal", "no_cat",
 }
 
@@ -624,6 +633,8 @@ def analyze_cat(
             "figurine_model":   "ตรวจพบโมเดลหรือฟิกเกอร์รูปแมว ไม่ใช่แมวจริง",
             "human_in_costume": "ตรวจพบมนุษย์ที่แต่งตัวเป็นแมว ไม่ใช่แมวจริง",
             "cat_mask_prop":    "ตรวจพบหน้ากากแมวหรืออุปกรณ์ประกอบฉาก ไม่ใช่แมวจริง",
+            "human_face_cat":   "ตรวจพบใบหน้ามนุษย์บนแมว (Face Swap/AI) ไม่ใช่แมวจริง",
+            "meme_cat":         "ตรวจพบภาพแมวมีม/ภาพที่ถูกตกแต่ง ไม่รองรับภาพประเภทนี้",  
             "other_animal":     "ตรวจพบสัตว์ชนิดอื่น ไม่ใช่แมว",
             "no_cat":           "ไม่พบแมวในภาพ",
         }
